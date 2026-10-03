@@ -61,6 +61,8 @@ Xem `harness/middleware.py` để biết thứ tự các hook.
 
 from __future__ import annotations
 
+import re
+
 from arena.model import is_degraded  # noqa: F401  (dùng trong phần TODO)
 
 from harness.middleware import Middleware
@@ -70,6 +72,26 @@ DEFAULT_MAX_ATTEMPTS = 3
 
 #: Số lượt để dành cho `submit` mà agent vẫn còn phải gọi.
 DEFAULT_RESERVE = 1
+
+_DOC_ID_RE = re.compile(r"doc-\d{4}")
+
+#: One-turn re-query reminder for DEPTH-style stalls (the answer is not
+#: in the question's own top-k, so "searched once, missed, gave up" is
+#: the likeliest failure). Sentinel-free on purpose: it must never
+#: trigger finalisation, and `_first_user_content` only scans the
+#: preamble before the first assistant turn, so a mid-run user message
+#: cannot be mistaken for the brief question. Mock-neutral: MockModel
+#: keys on FINALIZE_SENTINEL only, and the nudge removes no verbatim
+#: span, so mock behaviour is unchanged.
+REQUERY_NUDGE = (
+    "Kết quả vừa rồi không đưa thêm tài liệu mới. Hãy diễn đạt lại truy vấn "
+    "bằng thuật ngữ nội bộ (tên quy trình, tên chính sách, tên loại văn bản, "
+    "tên phòng ban) và tìm lại, đừng lặp lại truy vấn cũ."
+)
+
+#: Max re-query nudges per run (each costs prompt tokens every turn it is
+#: attached; the message itself is one-turn, never appended to history).
+MAX_REQUERY_NUDGES = 2
 
 
 class Retry(Middleware):
@@ -84,6 +106,26 @@ class Retry(Middleware):
     ) -> None:
         self.max_attempts = max(1, int(max_attempts))
         self.reserve = max(0, int(reserve))
+
+    def before_model(self, ctx, messages):
+        obs = getattr(ctx, "observations", None) or []
+        if len(obs) < 2:
+            return messages
+        if ctx.state.get("requery_nudges", 0) >= MAX_REQUERY_NUDGES:
+            return messages
+        # Never fight budget_policy: when the budget is spent the model
+        # must finalise, not re-query.
+        limit = ctx.max_tool_calls
+        if limit is not None and ctx.tools.calls >= limit - self.reserve:
+            return messages
+        seen: set = set()
+        for o in obs[:-1]:
+            seen.update(_DOC_ID_RE.findall(o if isinstance(o, str) else ""))
+        latest = set(_DOC_ID_RE.findall(obs[-1] if isinstance(obs[-1], str) else ""))
+        if latest and latest <= seen:
+            ctx.state["requery_nudges"] = ctx.state.get("requery_nudges", 0) + 1
+            return messages + [{"role": "user", "content": REQUERY_NUDGE}]
+        return messages
 
     def wrap_tool_call(self, ctx, call, name, args):
         result = call(name, args)

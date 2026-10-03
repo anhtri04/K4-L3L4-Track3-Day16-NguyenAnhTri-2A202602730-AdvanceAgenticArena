@@ -70,7 +70,33 @@ Xem `harness/middleware.py` để biết thứ tự các hook.
 
 from __future__ import annotations
 
+import re
+import unicodedata
+
 from harness.middleware import Middleware
+
+_WS_RE = re.compile(r"\s+")
+_WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+#: Scorer cap: a claim longer than this (after normalisation) is OVERLONG
+#: (penalty 1.0). Trimming to a substring stays inside both the model's
+#: output and the document line, so it converts OVERLONG back to SUPPORTED.
+MAX_CLAIM_CHARS = 500
+
+#: Hedge guard: the mock emits at most 4 claims, so this cap never fires
+#: on the mock path; it only trims a chatty real model's padding before
+#: IRRELEVANT/REDUNDANT penalties bite.
+MAX_KEPT_CLAIMS = 4
+
+
+def _norm(text: str) -> str:
+    if not isinstance(text, str):
+        text = "" if text is None else str(text)
+    return _WS_RE.sub(" ", unicodedata.normalize("NFC", text).casefold()).strip()
+
+
+def _overlap(text: str, question: str) -> int:
+    return len(set(_WORD_RE.findall(_norm(text))) & set(_WORD_RE.findall(_norm(question))))
 
 
 class Critic(Middleware):
@@ -79,6 +105,25 @@ class Critic(Middleware):
     name = "critic"
 
     def after_agent(self, ctx, report):
+        # P2: verdict-channel normalizer (synthesis briefs). A `verdict`
+        # list asserting exactly ONE distinct conclusion is de-duplicated
+        # to that single string — wording stays the model's. Anything else
+        # (empty, or two genuinely different options = HEDGED either way)
+        # is left untouched: picking a winner without evidence banks
+        # nothing, and HEDGED scores the same as silence.
+        verdict = report.get("verdict")
+        if isinstance(verdict, list):
+            uniq, seen_norm = [], set()
+            for v in verdict:
+                if not isinstance(v, str) or not v.strip():
+                    continue
+                n = _norm(v)
+                if n not in seen_norm:
+                    seen_norm.add(n)
+                    uniq.append(v.strip())
+            if len(uniq) == 1:
+                report["verdict"] = uniq[0]
+
         claims = report.get("claims")
         if not isinstance(claims, list) or not claims:
             return report
@@ -130,6 +175,33 @@ class Critic(Middleware):
                 kept.append({"text": right, "doc_id": ro})
                 saw_conflict = True
             # Không tách được -> bịa: bỏ claim đi.
+
+        # P1: claim-budget pruning — delete/trim only, never author text.
+        # 1. Drop exact-duplicate claims (pure padding).
+        # 2. Trim >500-char claims to a substring (still a quotation of
+        #    the same line, still contained in the model's output).
+        # 3. If more than MAX_KEPT_CLAIMS survive, keep the most
+        #    question-relevant ones (IRRELEVANT allowance scales with the
+        #    fact count, which a layer must not read, so question overlap
+        #    is the ground-truth-free proxy).
+        deduped: list = []
+        seen_texts: set = set()
+        for claim in kept:
+            t = claim.get("text", "")
+            if t in seen_texts:
+                continue
+            seen_texts.add(t)
+            if isinstance(t, str) and len(t) > MAX_CLAIM_CHARS:
+                claim = dict(claim, text=t[:MAX_CLAIM_CHARS])
+            deduped.append(claim)
+        kept = deduped
+        if len(kept) > MAX_KEPT_CLAIMS:
+            question = ctx.question
+            ranked = sorted(
+                range(len(kept)),
+                key=lambda i: (-_overlap(kept[i].get("text", ""), question), i),
+            )
+            kept = [kept[i] for i in sorted(ranked[:MAX_KEPT_CLAIMS])]
 
         report["claims"] = kept
         if not kept:
