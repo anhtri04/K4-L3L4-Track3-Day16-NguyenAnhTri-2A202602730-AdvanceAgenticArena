@@ -79,16 +79,71 @@ class Critic(Middleware):
     name = "critic"
 
     def after_agent(self, ctx, report):
-        # TODO (§2): khoảng 10-25 dòng.
-        #  1. Lấy report["claims"]; nếu rỗng hoặc không phải list thì thôi.
-        #  2. Với mỗi claim: nếu claim["text"] có trong ctx.observed_text
-        #     -> giữ nguyên (KHÔNG sửa chữ).
-        #  3. Nếu không: thử tách câu ghép (trường hợp (c) ở docstring).
-        #     Tách được -> giữ cả hai nửa, mỗi nửa gắn doc_id của tài liệu
-        #     thật sự chứa nó, và đặt report["abstain"] = True.
-        #  4. Không tách được -> đây là bịa: bỏ claim đi.
-        #  5. Nếu không còn claim nào: report["abstain"] = True,
-        #     claims = [], citations = [], và viết lại "answer" nói rõ là
-        #     không đủ căn cứ.
-        #  6. Cập nhật report["citations"] cho khớp với claims còn lại.
-        return report  # <- mặc định KHÔNG LÀM GÌ: agent vẫn chạy được
+        claims = report.get("claims")
+        if not isinstance(claims, list) or not claims:
+            return report
+
+        def _owner(text):
+            if ctx.corpus is None:
+                return None
+            for doc in ctx.corpus.docs:
+                if doc.body not in ctx.observed_text:
+                    continue
+                if text and any(text in line for line in doc.body.splitlines() if line):
+                    return doc.doc_id
+            return None
+
+        def _split_fused(text):
+            # Câu ghép "nửa-A và nửa-B": thử mọi điểm cắt " và ",
+            # nhận khi cả hai nửa đều nguyên văn trong quan sát
+            # nhưng thuộc HAI tài liệu khác nhau.
+            if not isinstance(text, str) or " và " not in text:
+                return None
+            idx = 0
+            while True:
+                j = text.find(" và ", idx)
+                if j == -1:
+                    return None
+                left, right = text[:j].strip(), text[j + 4 :].strip()
+                idx = j + 1
+                if not left or not right:
+                    continue
+                if left not in ctx.observed_text or right not in ctx.observed_text:
+                    continue
+                lo, ro = _owner(left), _owner(right)
+                if lo is not None and ro is not None and lo != ro:
+                    return (left, lo, right, ro)
+
+        kept: list = []
+        saw_conflict = False
+        for claim in claims:
+            if not isinstance(claim, dict):
+                continue
+            text = claim.get("text")
+            if isinstance(text, str) and text and text in ctx.observed_text:
+                kept.append(claim)  # giữ nguyên, KHÔNG sửa chữ
+                continue
+            split = _split_fused(text)
+            if split is not None:
+                left, lo, right, ro = split
+                kept.append({"text": left, "doc_id": lo})
+                kept.append({"text": right, "doc_id": ro})
+                saw_conflict = True
+            # Không tách được -> bịa: bỏ claim đi.
+
+        report["claims"] = kept
+        if not kept:
+            report["abstain"] = True
+            report["citations"] = []
+            report["answer"] = "Không đủ căn cứ trong tài liệu đã đọc để trả lời."
+        else:
+            if saw_conflict:
+                report["abstain"] = True
+            report["citations"] = sorted(
+                {
+                    c.get("doc_id")
+                    for c in kept
+                    if isinstance(c.get("doc_id"), str) and c.get("doc_id")
+                }
+            )
+        return report
