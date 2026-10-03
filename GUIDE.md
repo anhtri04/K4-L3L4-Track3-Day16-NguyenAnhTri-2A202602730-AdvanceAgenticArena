@@ -250,14 +250,14 @@ Rút một layer mà điểm **không đổi** → layer đó chưa làm gì (ri
 
 ### 5.3. Checklist trước khi freeze
 
-- [ ] `python3 -m pytest -q` vẫn xanh
-- [ ] Không có dòng `⚠ Không có FINAL đọc được ở: …`
-- [ ] `gate_passed = true` cho cả 9 brief
-- [ ] Không có `claim["text"] = ...` ở bất kỳ layer nào (chỉ xoá/giữ/cắt)
-- [ ] Không có `if brief_id == ...`, không đọc `Doc.tags`
-- [ ] Không có `try/except` nuốt lỗi trong hook
-- [ ] `git status` cho thấy **không** có thay đổi nào trong `arena/` (hoặc `scripts/verify.py` xanh)
-- [ ] `MAX_STEPS = 40` còn nguyên
+- [X] `python3 -m pytest -q` vẫn xanh
+- [X] Không có dòng `⚠ Không có FINAL đọc được ở: …`
+- [X] `gate_passed = true` cho cả 9 brief
+- [X] Không có `claim["text"] = ...` ở bất kỳ layer nào (chỉ xoá/giữ/cắt)
+- [X] Không có `if brief_id == ...`, không đọc `Doc.tags`
+- [X] Không có `try/except` nuốt lỗi trong hook
+- [X] `git status` cho thấy **không** có thay đổi nào trong `arena/` (hoặc `scripts/verify.py` xanh)
+- [X] `MAX_STEPS = 40` còn nguyên
 
 ---
 

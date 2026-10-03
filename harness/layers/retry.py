@@ -86,7 +86,8 @@ _DOC_ID_RE = re.compile(r"doc-\d{4}")
 REQUERY_NUDGE = (
     "Kết quả vừa rồi không đưa thêm tài liệu mới. Hãy diễn đạt lại truy vấn "
     "bằng thuật ngữ nội bộ (tên quy trình, tên chính sách, tên loại văn bản, "
-    "tên phòng ban) và tìm lại, đừng lặp lại truy vấn cũ."
+    "tên phòng ban) và tìm lại, rồi đọc toàn văn những tài liệu mới thấy; "
+    "đừng lặp lại truy vấn cũ."
 )
 
 #: Max re-query nudges per run (each costs prompt tokens every turn it is

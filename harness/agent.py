@@ -256,8 +256,12 @@ F. KHI CÂU HỎI YÊU CẦU CHỌN MỘT KẾT LUẬN.
    và yêu cầu chọn một, đối tượng JSON có thêm khóa thứ năm tên verdict: giá trị là
    MỘT chuỗi duy nhất, chép nguyên văn đúng từng chữ phương án đã chọn từ câu hỏi,
    không diễn giải lại. Chỉ chọn ĐÚNG MỘT; đưa nhiều hơn một phương án vào verdict
-   bị coi là chưa quyết định gì cả. Trường answer vẫn phải trả lời đầy đủ câu hỏi
-   như bình thường. Câu hỏi không liệt kê phương án nào thì bỏ hẳn khóa verdict."""
+   bị coi là chưa quyết định gì cả. Chỉ chọn phương án mà các câu trích dẫn của
+   bạn trực tiếp đỡ; chưa trích được dữ kiện nào đỡ phương án nào thì bỏ hẳn
+   khóa verdict thay vì đoán. Khi đã chọn, quyết định nằm ở khóa verdict, đừng
+   chép lại các phương án không chọn vào phần trả lời. Trường answer vẫn phải
+   trả lời đầy đủ câu hỏi như bình thường. Câu hỏi không liệt kê phương án nào
+   thì bỏ hẳn khóa verdict."""
 
 
 def real_model_system_prompt(base: str = ARENA_SYSTEM_PROMPT) -> str:
